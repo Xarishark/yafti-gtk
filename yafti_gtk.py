@@ -139,6 +139,7 @@ class YaftiGTK(Gtk.Window):
         # Load YAML configuration
         self.config = self.load_config(config_file)
         self.screens = self.config.get('screens', [])
+        self.actions_index = self._build_actions_index()
         
         # Create main container
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -192,11 +193,9 @@ class YaftiGTK(Gtk.Window):
 
         # Start at home view
         self.show_home()
-        
-        # Add status bar at bottom
-        self.statusbar = Gtk.Statusbar()
-        self.status_context = self.statusbar.get_context_id("status")
-        vbox.pack_start(self.statusbar, False, False, 0)
+        # Status bar removed to avoid confusing "Running" messages during scripts
+        self.statusbar = None
+        self.status_context = None
         
     def load_config(self, config_file):
         """Load and parse the YAML configuration file"""
@@ -311,27 +310,63 @@ class YaftiGTK(Gtk.Window):
         
         return frame
 
+    def _build_actions_index(self):
+        """Flatten actions for search lookup."""
+        index = []
+        for screen in self.screens or []:
+            for action in screen.get('actions', []):
+                index.append({'screen_title': screen.get('title', ''), 'action': action})
+        return index
+
     def create_categories_page(self):
         """Home page listing categories (screens)."""
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        outer.set_margin_top(20)
+        outer.set_margin_bottom(20)
+        outer.set_margin_start(20)
+        outer.set_margin_end(20)
+
+        # Search field (kept outside scrolled content so it stays fixed)
+        search_entry = Gtk.SearchEntry()
+        search_entry.set_placeholder_text("Search Apps and Actions")
+        search_entry.set_width_chars(32)
+        search_entry.set_halign(Gtk.Align.CENTER)
+        search_entry.connect("search-changed", self.on_search_changed)
+        search_entry.connect("changed", self.on_search_changed)
+        self.search_entry = search_entry
+        outer.pack_start(search_entry, False, False, 0)
+
+        # Scrolled area for results + categories
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+
+        # Search results area (hidden when empty)
+        self.search_results_revealer = Gtk.Revealer()
+        self.search_results_revealer.set_reveal_child(False)
+        self.search_results_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.search_results_box = results_box
+        self.search_results_revealer.add(results_box)
+        content.pack_start(self.search_results_revealer, False, False, 0)
 
         # Center a vertical stack of category buttons
         container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         container.set_valign(Gtk.Align.CENTER)
         container.set_halign(Gtk.Align.CENTER)
-        container.set_margin_top(20)
-        container.set_margin_bottom(20)
-        container.set_margin_start(20)
-        container.set_margin_end(20)
+        self.categories_container = container
 
         for idx, screen in enumerate(self.screens):
             screen_name = f"screen-{idx}"
             card = self.create_category_button(screen, screen_name)
             container.pack_start(card, False, False, 0)
 
-        scrolled.add(container)
-        return scrolled
+        content.pack_start(container, True, True, 0)
+        scrolled.add(content)
+
+        outer.pack_start(scrolled, True, True, 0)
+        return outer
 
     def create_category_button(self, screen, screen_name):
         """Create a clickable card for a category (screen)."""
@@ -364,6 +399,56 @@ class YaftiGTK(Gtk.Window):
         frame.add(button)
         return frame
 
+    def create_action_result(self, action, screen_title):
+        """Render a search result as a labeled action card."""
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        wrapper.pack_start(self.create_action_item(action), False, False, 0)
+        return wrapper
+
+    def _clear_search_results(self):
+        for child in self.search_results_box.get_children():
+            self.search_results_box.remove(child)
+        self.search_results_revealer.set_reveal_child(False)
+        if hasattr(self, 'categories_container'):
+            self.categories_container.show()
+
+    def on_search_changed(self, entry):
+        query = entry.get_text().strip()
+        if not query:
+            self._clear_search_results()
+            if hasattr(self, 'categories_container'):
+                self.categories_container.show()
+            return
+
+        lowered = query.lower()
+        matches = []
+        for item in self.actions_index:
+            action = item['action']
+            title = action.get('title', '')
+            desc = action.get('description', '')
+            if lowered in title.lower() or lowered in desc.lower():
+                matches.append(item)
+
+        self._clear_search_results()
+        header = Gtk.Label()
+        header.set_markup("<b>Search results</b>")
+        header.set_xalign(0)
+        self.search_results_box.pack_start(header, False, False, 0)
+
+        if matches:
+            for item in matches:
+                result = self.create_action_result(item['action'], item['screen_title'])
+                self.search_results_box.pack_start(result, False, False, 0)
+        else:
+            empty = Gtk.Label(label="No matches found")
+            empty.set_xalign(0)
+            self.search_results_box.pack_start(empty, False, False, 0)
+
+        self.search_results_box.show_all()
+        self.search_results_revealer.set_reveal_child(True)
+        if hasattr(self, 'categories_container'):
+            self.categories_container.hide()
+
     def show_home(self, *args):
         """Navigate back to category list."""
         self.stack.set_visible_child_name("home")
@@ -371,6 +456,10 @@ class YaftiGTK(Gtk.Window):
         self.nav_box.hide()
         self.home_hint.set_visible(True)
         self.section_label.set_text("")
+        if hasattr(self, 'search_entry'):
+            self.search_entry.set_text("")
+        if hasattr(self, '_clear_search_results'):
+            self._clear_search_results()
 
     def show_screen(self, button, screen_name, screen_title):
         """Show a specific screen/page of actions."""
@@ -379,15 +468,21 @@ class YaftiGTK(Gtk.Window):
         self.nav_box.show()
         self.home_hint.set_visible(False)
         self.section_label.set_text(screen_title or "")
+        if hasattr(self, 'search_entry'):
+            self.search_entry.set_text("")
+        if hasattr(self, '_clear_search_results'):
+            self._clear_search_results()
     
     def on_action_clicked(self, button, title, script):
         """Handle action button click - run script in terminal window"""
         if not script:
-            self.statusbar.push(self.status_context, "No script defined for this action")
+            if self.statusbar:
+                self.statusbar.push(self.status_context, "No script defined for this action")
             return
         
         # Update statusbar
-        self.statusbar.push(self.status_context, f"Running: {title}")
+        if self.statusbar:
+            self.statusbar.push(self.status_context, f"Running: {title}")
         
         # Create dialog with terminal
         dialog = Gtk.Dialog(
@@ -452,22 +547,26 @@ class YaftiGTK(Gtk.Window):
         # Handle dialog response
         dialog.connect("response", lambda d, r: d.destroy())
     
-    def on_terminal_spawn_callback(self, terminal, pid, error, user_data):
+    def on_terminal_spawn_callback(self, terminal, task, user_data):
         """Callback after terminal spawn"""
         dialog, title = user_data
-        if error:
-            self.statusbar.push(self.status_context, f"Error running {title}")
+        try:
+            pid = terminal.spawn_finish(task)
+        except GLib.Error as error:
+            if self.statusbar:
+                self.statusbar.push(self.status_context, f"Error running {title}")
             print(f"Error: {error}")
-        else:
-            # Watch for child exit
-            terminal.connect("child-exited", self.on_terminal_child_exited, dialog, title)
+            return
+        # Watch for child exit
+        terminal.connect("child-exited", self.on_terminal_child_exited, dialog, title)
     
     def on_terminal_child_exited(self, terminal, status, dialog, title):
         """Handle terminal process exit"""
-        if status == 0:
-            self.statusbar.push(self.status_context, f"Completed: {title}")
-        else:
-            self.statusbar.push(self.status_context, f"Failed: {title} (exit code: {status})")
+        if self.statusbar:
+            if status == 0:
+                self.statusbar.push(self.status_context, f"Completed: {title}")
+            else:
+                self.statusbar.push(self.status_context, f"Failed: {title} (exit code: {status})")
 
 
 def main():
