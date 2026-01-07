@@ -11,7 +11,109 @@ import sys
 
 gi.require_version('Gtk', '3.0')
 gi.require_version('Vte', '2.91')
-from gi.repository import Gtk, Vte, GLib
+from gi.repository import Gtk, Vte, GLib, Gio
+import configparser
+
+
+def _read_ini_value(path, section, key):
+    parser = configparser.ConfigParser()
+    parser.optionxform = str
+    try:
+        if os.path.exists(path):
+            parser.read(path)
+            return parser.get(section, key, fallback=None)
+    except Exception:
+        pass
+    return None
+
+
+def _detect_dark_preference():
+    """Detect if system prefers dark theme without initializing GTK."""
+    prefers_dark = True  # default to dark
+
+    # Check portal for color-scheme preference
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        proxy = Gio.DBusProxy.new_sync(
+            bus, Gio.DBusProxyFlags.NONE, None,
+            'org.freedesktop.portal.Desktop',
+            '/org/freedesktop/portal/desktop',
+            'org.freedesktop.portal.Settings',
+            None,
+        )
+        variant = proxy.call_sync(
+            'Read',
+            GLib.Variant('(ss)', ('org.freedesktop.appearance', 'color-scheme')),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+        )
+        read_value = variant.get_child_value(0)
+        color_scheme = read_value.unpack() if hasattr(read_value, 'unpack') else read_value
+        # Portal values: 0 = default, 1 = prefer-dark, 2 = prefer-light
+        if color_scheme == 1:
+            prefers_dark = True
+        elif color_scheme == 2:
+            prefers_dark = False
+    except Exception:
+        pass
+
+    # Fallback: GSettings
+    if not prefers_dark:
+        try:
+            interface = Gio.Settings.new('org.gnome.desktop.interface')
+            color_scheme = interface.get_string('color-scheme') if interface else ''
+            if color_scheme == 'prefer-dark':
+                prefers_dark = True
+            elif not prefers_dark:
+                theme_name = interface.get_string('gtk-theme') if interface else ''
+                prefers_dark = 'dark' in theme_name.lower()
+        except Exception:
+            pass
+
+    # Fallback: GTK_THEME env
+    if not prefers_dark:
+        gtk_theme_env = os.environ.get('GTK_THEME', '')
+        if 'dark' in gtk_theme_env.lower():
+            prefers_dark = True
+
+    # Fallback: gtk settings.ini
+    if not prefers_dark:
+        ini_val = _read_ini_value(os.path.expanduser('~/.config/gtk-3.0/settings.ini'), 'Settings', 'gtk-application-prefer-dark-theme')
+        if ini_val and ini_val.strip() == '1':
+            prefers_dark = True
+        if not prefers_dark:
+            ini_theme = _read_ini_value(os.path.expanduser('~/.config/gtk-3.0/settings.ini'), 'Settings', 'gtk-theme-name')
+            if ini_theme and 'dark' in ini_theme.lower():
+                prefers_dark = True
+
+    # Fallback: KDE
+    if not prefers_dark:
+        kde_scheme = _read_ini_value(os.path.expanduser('~/.config/kdeglobals'), 'General', 'ColorScheme')
+        if kde_scheme and 'dark' in kde_scheme.lower():
+            prefers_dark = True
+
+    return prefers_dark
+
+
+def setup_theme():
+    """Detect and apply system theme preference at startup."""
+    prefers_dark = _detect_dark_preference()
+    
+    # Set GTK_THEME env before GTK init
+    if prefers_dark:
+        os.environ['GTK_THEME'] = 'Adwaita:dark'
+    else:
+        os.environ.pop('GTK_THEME', None)
+    
+    # Initialize GTK
+    Gtk.init([])
+    
+    # Set GTK theme properties
+    settings = Gtk.Settings.get_default()
+    if settings:
+        settings.set_property('gtk-application-prefer-dark-theme', prefers_dark)
+
 
 class YaftiGTK(Gtk.Window):
     def __init__(self, config_file='yafti.yml'):
@@ -249,11 +351,15 @@ class YaftiGTK(Gtk.Window):
         else:
             self.statusbar.push(self.status_context, f"Failed: {title} (exit code: {status})")
 
+
 def main():
-    # Check if config file exists
-    config_file = 'yafti.yml'
+    # Apply theme before creating window
+    setup_theme()
+
+    # Use host-provided Bazzite portal config
+    config_file = '/run/host/usr/share/yafti/yafti.yml'
     if not os.path.exists(config_file):
-        print(f"Error: {config_file} not found in current directory")
+        print(f"Error: yafti config not found at {config_file}")
         sys.exit(1)
     
     # Create and show window
@@ -261,6 +367,7 @@ def main():
     win.connect("destroy", Gtk.main_quit)
     win.show_all()
     Gtk.main()
+
 
 if __name__ == '__main__':
     main()
