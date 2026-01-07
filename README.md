@@ -23,13 +23,29 @@ The default configuration file is located at:
 
 ## Building from Source
 
-### Requirements
+### Using Dev Container (Recommended)
+
+The project includes a `.devcontainer` configuration for consistent development environment:
+
+1. Open the project in VS Code
+2. Click "Reopen in Container" when prompted (or use Command Palette: "Dev Containers: Reopen in Container")
+3. Build the Flatpak inside the container:
+
+```bash
+flatpak-builder --user --install --force-clean build-dir com.github.yafti.gtk.yml
+```
+
+The container includes all required dependencies (Flatpak, flatpak-builder, org.gnome.Platform/Sdk 48).
+
+### Manual Build
+
+#### Requirements
 
 - Flatpak
 - flatpak-builder
 - org.gnome.Platform runtime (version 48)
 
-### Build and Install
+#### Build and Install
 
 Build and install the Flatpak locally:
 
