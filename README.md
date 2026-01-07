@@ -113,3 +113,38 @@ If no host terminal is available, commands run in an embedded VTE terminal dialo
 ## License
 
 See LICENSE file for details.
+
+## Exporting the Flatpak from a Docker Volume (Linux)
+
+If you run the devcontainer in Docker using a named volume (or without a host bind), the built bundle will live inside the container filesystem or volume. Use one of these methods to copy `output/yafti-gtk.flatpak` to your home directory.
+
+- From a running container (simplest):
+
+```bash
+# find the container id
+docker ps
+# copy the bundle to your home directory
+docker cp <container-id>:/workspaces/yafti-gtk/output/yafti-gtk.flatpak ~/
+```
+
+- From a named Docker volume (no running container):
+
+```bash
+# replace VOLUME with your volume name
+docker run --rm -v VOLUME:/data -v "$HOME":/host alpine \
+  sh -c "cp /data/output/yafti-gtk.flatpak /host/"
+```
+
+- Alternative (mount volume to temporary container and inspect):
+
+```bash
+docker run --rm -it -v VOLUME:/data alpine sh
+ls /data/output
+exit
+```
+
+After copying, the file will be available at `~/yafti-gtk.flatpak` (or whatever destination you chose). You can then install it on a Linux machine with:
+
+```bash
+flatpak install --user ~/yafti-gtk.flatpak
+```

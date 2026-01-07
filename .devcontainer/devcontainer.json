@@ -1,41 +1,12 @@
 {
-  "name": "Bazzite Portal Development",
+  "name": "Bazzite Portal Flatpak Builder",
   "image": "fedora:latest",
-  
+
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
-      "installZsh": true,
-      "installOhMyZsh": true,
       "upgradePackages": true
     }
   },
   
-  "postCreateCommand": "sudo dnf install -y flatpak flatpak-builder && flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo && flatpak install -y --user org.gnome.Platform//48 org.gnome.Sdk//48",
-  
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "ms-python.python",
-        "redhat.vscode-yaml",
-        "bierner.markdown-preview-github-styles"
-      ],
-      "settings": {
-        "python.defaultInterpreterPath": "/usr/bin/python3"
-      }
-    }
-  },
-  
-  "remoteUser": "vscode",
-  
-  "mounts": [
-    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
-  ],
-  
-  "runArgs": [
-    "--device=/dev/dri"
-  ],
-  
-  "containerEnv": {
-    "DISPLAY": "${localEnv:DISPLAY}"
-  }
+  "postCreateCommand": "sudo dnf install -y flatpak flatpak-builder && flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo && flatpak install -y --user org.gnome.Platform//48 org.gnome.Sdk//48 && chmod +x build-flatpak.sh && ./build-flatpak.sh && mkdir -p output && cp yafti-gtk.flatpak output/ && echo 'Flatpak exported to output/yafti-gtk.flatpak'"
 }
