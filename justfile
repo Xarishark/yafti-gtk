@@ -16,8 +16,8 @@ install:
     flatpak install --user -y output/yafti-gtk.flatpak
 
 # Run yafti-gtk from the installed flatpak with default config
-run:
-    flatpak run com.github.yafti.gtk /run/host/usr/share/yafti/yafti.yml
+run yml="/run/host/usr/share/yafti/yafti.yml":
+    flatpak run com.github.yafti.gtk {{yml}}
 
 # Set up distrobox container with dependencies
 setup:
