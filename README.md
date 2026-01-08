@@ -18,7 +18,7 @@ review the justfile for all recipies. You can stack just commands together, for 
 just setup build install run
 ```
 
-This will install `flatpak-builder`, build the flatpak inside a container, install to host, then run it with the default source file.
+This will install `flatpak-builder`, build the flatpak, install to host, then run it with the default source file.
 
 Then for subsequent changes, you could run:
 
