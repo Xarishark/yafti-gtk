@@ -82,11 +82,12 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: yafti-gtk-flatpak
+          path: .
 
       - name: Create GitHub release
         id: create_release
         if: steps.version_check.outputs.new_version != ''
-        uses: actions/create-release@v1
+        uses: actions/create-release@v4
         with:
           tag_name: v${{ steps.version_check.outputs.new_version }}
           release_name: v${{ steps.version_check.outputs.new_version }}
@@ -96,7 +97,7 @@ jobs:
 
       - name: Upload release asset
         if: steps.version_check.outputs.new_version != ''
-        uses: actions/upload-release-asset@v1
+        uses: actions/upload-release-asset@v4
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./yafti-gtk.flatpak
