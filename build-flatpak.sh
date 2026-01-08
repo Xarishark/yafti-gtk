@@ -3,13 +3,10 @@ set -e
 
 echo "Building Yafti GTK Flatpak..."
 
-# Check for flatpak-builder
-if ! command -v flatpak-builder &> /dev/null; then
-    echo "Error: flatpak-builder not found. Please install it first."
-    echo "  Fedora: sudo dnf install flatpak-builder"
-    echo "  Arch: sudo pacman -S flatpak-builder"
-    echo "  Debian/Ubuntu: sudo apt-get install flatpak-builder"
-    exit 1
+# Check for flatpak-builder from Flathub
+if ! flatpak list --user | grep -q org.flatpak.Builder; then
+    echo "Error: org.flatpak.Builder not found. Installing from Flathub..."
+    flatpak install --user -y flathub org.flatpak.Builder || exit 1
 fi
 
 # Add Flathub repo if not present
@@ -27,8 +24,7 @@ fi
 
 # Build the flatpak
 echo "Building flatpak package..."
-# Build without installing (installation happens outside container)
-flatpak-builder --disable-rofiles-fuse --user --force-clean build-dir com.github.yafti.gtk.yml --repo=repo
+flatpak run org.flatpak.Builder --disable-rofiles-fuse --user --force-clean build-dir com.github.yafti.gtk.yml --repo=repo
 
 # Export the flatpak bundle
 echo "Exporting flatpak bundle..."

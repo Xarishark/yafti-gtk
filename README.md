@@ -15,10 +15,17 @@ The default configuration file is located at:
 review the justfile for all recipies. You can stack just commands together, for example:
 
 ```bash
-just build install run
+just setup build install run
 ```
 
-This will build the flatpak inside a container, install to host, then run it with the default source file.
+This will install `flatpak-builder`, build the flatpak inside a container, install to host, then run it with the default source file.
+
+Then for subsequent changes, you could run:
+
+```bash
+just clean uninstall build
+```
+Or any combination you need to test any changes.
 
 ## Running
 
