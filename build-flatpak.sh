@@ -34,13 +34,13 @@ flatpak install -y --user flathub org.gnome.Platform//48 org.gnome.Sdk//48 2>/de
 
 # Build the flatpak
 echo "Building flatpak package..."
-# Disable rofiles-fuse for environments without /dev/fuse
-flatpak-builder --disable-rofiles-fuse --user --install --force-clean build-dir com.github.yafti.gtk.yml
+# Build without installing (installation happens outside container)
+flatpak-builder --disable-rofiles-fuse --user --force-clean build-dir com.github.yafti.gtk.yml --repo=repo
 
 # Export the flatpak bundle
 echo "Exporting flatpak bundle..."
 mkdir -p output
-flatpak build-bundle ~/.local/share/flatpak/repo output/yafti-gtk.flatpak com.github.yafti.gtk || true
+flatpak build-bundle repo output/yafti-gtk.flatpak com.github.yafti.gtk
 
 # Ensure the bundle is consistently available under output/yafti-gtk.flatpak
 # Some environments (or fallback CI steps) may write the bundle to the repository

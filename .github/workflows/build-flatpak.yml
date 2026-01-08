@@ -31,8 +31,9 @@ jobs:
             echo "Build script succeeded"
           else
             echo "Initial build failed; retrying with --disable-rofiles-fuse"
-            flatpak-builder --disable-rofiles-fuse --user --install --force-clean build-dir com.github.yafti.gtk.yml
-            flatpak build-bundle ~/.local/share/flatpak/repo yafti-gtk.flatpak com.github.yafti.gtk
+            flatpak-builder --disable-rofiles-fuse --user --force-clean build-dir com.github.yafti.gtk.yml --repo=repo
+            mkdir -p output
+            flatpak build-bundle repo output/yafti-gtk.flatpak com.github.yafti.gtk
           fi
 
       - name: Upload Flatpak artifact
