@@ -79,27 +79,18 @@ jobs:
           echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
 
       - name: Download bundle artifact
-        uses: actions/download-artifact@v3
+        if: steps.version_check.outputs.new_version != ''
+        uses: actions/download-artifact@v4
         with:
           name: yafti-gtk-flatpak
           path: .
 
-      - name: Create GitHub release
-        id: create_release
+      - name: Create release and upload asset (gh)
         if: steps.version_check.outputs.new_version != ''
-        uses: actions/create-release@v4
-        with:
-          tag_name: v${{ steps.version_check.outputs.new_version }}
-          release_name: v${{ steps.version_check.outputs.new_version }}
-          body: "Release ${{ steps.version_check.outputs.new_version }}"
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version_check.outputs.new_version }}"
+          echo "Creating release v${VERSION} and uploading yafti-gtk.flatpak"
+          gh release create "v${VERSION}" yafti-gtk.flatpak --title "v${VERSION}" --notes "Release ${VERSION}" --target "${{ github.sha }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload release asset
-        if: steps.version_check.outputs.new_version != ''
-        uses: actions/upload-release-asset@v4
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./yafti-gtk.flatpak
-          asset_name: yafti-gtk.flatpak
-          asset_content_type: application/octet-stream
