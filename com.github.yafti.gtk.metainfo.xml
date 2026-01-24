@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.github.yafti.gtk</id>
+  <id>io.github.xxjsonderuloxx.yafti-gtk</id>
   <name>Bazzite Portal</name>
   <summary>Helps you setup Bazzite</summary>
   <description>
