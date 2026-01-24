@@ -2,6 +2,9 @@
 <component type="desktop-application">
   <id>io.github.xxjsonderuloxx.yafti-gtk</id>
   <name>Bazzite Portal</name>
+  <developer id="io.github.xxjsonderuloxx">
+    <name>Kurt Himebauch</name>
+  </developer>
   <summary>Helps you setup Bazzite</summary>
   <description>
     <p>Yafti GTK — helper GUI to run Bazzite setup scripts and utilities.</p>
