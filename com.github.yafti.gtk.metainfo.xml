@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop">
+  <id>com.github.yafti.gtk</id>
+  <name>Bazzite Portal</name>
+  <summary>Run Bazzite setup scripts</summary>
+  <url type="homepage">https://github.com/xXJSONDeruloXx/yafti-gtk</url>
+  <release>
+    <version>0.1.2</version>
+  </release>
+</component>
