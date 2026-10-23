@@ -121,6 +121,7 @@ class DriverTests(unittest.TestCase):
         self.backend.sample.return_value = [(1, {'confirm'}, 0, 0, {})]
         self.driver.poll()
         self.context = 'main'
+        self.driver.set_active(True)
         self.driver.poll()
         self.assertEqual(self.commands, [])
         self.backend.sample.return_value = [(1, set(), 0, 0, {})]
@@ -150,6 +151,60 @@ class DriverTests(unittest.TestCase):
 
     def test_activation_discards_remaining_commands(self):
         self.backend.sample.return_value = [(1, {'confirm', 'next_tab'}, 0, 0, {})]
+        self.driver.poll()
+        self.assertEqual(self.commands, ['confirm'])
+
+    def test_pause_stops_sampling_and_timer(self):
+        calls = self.backend.sample.call_count
+        self.context = None
+        self.assertFalse(self.driver.poll())
+        self.assertFalse(self.driver.poll())
+        self.assertEqual(self.backend.sample.call_count, calls)
+        self.scheduler.source_remove.assert_called_once_with(42)
+        self.backend.close.assert_called_once()
+        self.assertEqual(self.driver.inputs, {})
+
+    def test_resume_is_idempotent_and_close_is_permanent(self):
+        self.driver.set_active(False)
+        self.backend.resume.reset_mock()
+        self.driver.set_active(True)
+        self.driver.set_active(True)
+        self.backend.resume.assert_called_once()
+        self.driver.close()
+        self.driver.set_active(True)
+        self.assertFalse(self.driver.poll())
+        self.backend.resume.assert_called_once()
+
+    def test_initially_inactive_has_no_timer(self):
+        scheduler = Mock()
+        backend = Mock()
+        driver = app.ControllerDriver(backend, lambda: None, Mock(), scheduler, active=False)
+        scheduler.timeout_add.assert_not_called()
+        backend.close.assert_called_once()
+        self.assertFalse(driver.poll())
+
+    def test_resume_failure_is_not_retried(self):
+        self.driver.set_active(False)
+        self.backend.resume.side_effect = RuntimeError('resume failed')
+        self.backend.resume.reset_mock()
+        with patch('sys.stderr'):
+            self.driver.set_active(True)
+            self.driver.set_active(True)
+        self.backend.resume.assert_called_once()
+        self.assertTrue(self.driver.failed)
+        self.assertIsNone(self.driver.source)
+
+    def test_hotplug_while_paused_requires_neutral_on_return(self):
+        self.driver.set_active(False)
+        self.backend.sample.return_value = [(2, {'confirm'}, .8, 0, {})]
+        self.driver.set_active(True)
+        self.driver.poll()
+        self.backend.sample.return_value = [(2, set(), .8, 0, {})]
+        self.driver.poll()
+        self.assertEqual(self.commands, [])
+        self.backend.sample.return_value = [(2, set(), 0, 0, {})]
+        self.driver.poll()
+        self.backend.sample.return_value = [(2, {'confirm'}, 0, 0, {})]
         self.driver.poll()
         self.assertEqual(self.commands, ['confirm'])
 
@@ -240,6 +295,16 @@ class SDLTests(unittest.TestCase):
         self.sdl.SDL_CloseGamepad.assert_called_once_with(123)
         self.assertEqual(self.sdl.SDL_free.call_count, 2)
 
+    def test_resume_reopens_devices_with_new_serial(self):
+        first = self.backend.sample()
+        self.backend.close()
+        self.backend.resume()
+        self.backend.resume()
+        second = self.backend.sample()
+        self.assertNotEqual(first[0][0], second[0][0])
+        self.assertEqual(self.sdl.SDL_InitSubSystem.call_count, 2)
+        self.assertEqual(self.sdl.SDL_OpenGamepad.call_count, 2)
+
     def test_cleanup_is_idempotent(self):
         self.backend.sample()
         self.backend.close()
@@ -310,6 +375,8 @@ class NavigationTests(unittest.TestCase):
         self.window.controller_dialogs = []
         self.window.active_dialog_state = None
         self.window.controller_driver = None
+        self.window._controller_closed = False
+        self.window._controller_focus_sync_source = None
         self.window.controller_focus = None
         self.window.controller_used = False
         self.window.controller_legend = Mock()
@@ -328,6 +395,31 @@ class NavigationTests(unittest.TestCase):
         self.window.screen_stack.get_visible_child.return_value = self.page
         self.window.content_stack = Mock()
         self.window.content_stack.get_visible_child_name.return_value = 'tabs'
+
+    def test_focus_notifications_are_coalesced(self):
+        self.window.controller_driver = Mock()
+        self.window.on_controller_context_changed()
+        self.window.on_controller_context_changed()
+        app.GLib.idle_add.assert_called_once()
+        self.window.controller_driver.set_active.assert_not_called()
+        self.window._sync_controller_focus()
+        self.window.controller_driver.set_active.assert_called_once_with(True)
+        self.window.get_property = lambda _name: False
+        self.window._sync_controller_focus()
+        self.window.controller_driver.set_active.assert_called_with(False)
+
+    def test_close_cancels_pending_resume(self):
+        self.window.controller_driver = Mock()
+        driver = self.window.controller_driver
+        self.window.on_controller_context_changed()
+        source = self.window._controller_focus_sync_source
+        self.window.on_controller_close_request()
+        app.GLib.source_remove.assert_called_with(source)
+        self.window._sync_controller_focus()
+        self.window.on_controller_context_changed()
+        driver.close.assert_called_once()
+        driver.set_active.assert_not_called()
+        self.assertFalse(self.window.start_controller())
 
     def test_navigation_includes_actions_without_ids_and_skips_toggle(self):
         self.window.dispatch_controller('down')
