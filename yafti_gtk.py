@@ -131,7 +131,12 @@ class SDLGamepad:
         for name, (result, arguments) in signatures.items():
             function = getattr(self.sdl, name)
             function.restype, function.argtypes = result, arguments
-        # SDL has no window to track focus. The GTK dispatcher gates input instead.
+        self.resume()
+
+    def resume(self):
+        if self.initialized:
+            return
+        # GTK controls the polling lifecycle; SDL has no window to track focus.
         self.sdl.SDL_SetHint(b'SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS', b'1')
         if not self.sdl.SDL_InitSubSystem(self.INIT_GAMEPAD):
             error = self.sdl.SDL_GetError()
@@ -189,29 +194,65 @@ class SDLGamepad:
 class ControllerDriver:
     """GLib timer lifecycle and focus gating, also usable with mocked backends."""
 
-    def __init__(self, backend, context, dispatch, scheduler=GLib):
+    def __init__(self, backend, context, dispatch, scheduler=GLib, *, active=True):
         self.backend, self.context, self.dispatch = backend, context, dispatch
         self.scheduler = scheduler
         self.inputs = {}
         self.last_context = None
-        self.source = scheduler.timeout_add(16, self.poll)
+        self.source = None
+        self.active = False
+        self.closed = False
+        self.failed = False
+        if active:
+            self.set_active(True)
+        else:
+            self.backend.close()
+
+    def set_active(self, active):
+        if self.closed or self.failed or self.active == active:
+            return
+        if not active:
+            self._stop()
+            return
+        try:
+            self.backend.resume()
+            self.active = True
+            self.source = self.scheduler.timeout_add(16, self.poll)
+        except Exception as error:
+            self._disable(error)
+
+    def _stop(self):
+        if self.source is not None:
+            self.scheduler.source_remove(self.source)
+            self.source = None
+        self.active = False
+        self.backend.close()
+        self.inputs.clear()
+        self.last_context = None
+
+    def _disable(self, error):
+        print(f'Warning: Controller support disabled: {error}', file=sys.stderr)
+        self.failed = True
+        self._stop()
 
     def reset_inputs(self):
         for state in self.inputs.values():
             state.reset()
 
     def poll(self):
+        if not self.active or self.closed:
+            return False
         try:
-            samples = self.backend.sample()
             context = self.context()
+            if not context:
+                self.set_active(False)
+                return False
+            samples = self.backend.sample()
             connected = {sample[0] for sample in samples}
             self.inputs = {serial: state for serial, state in self.inputs.items() if serial in connected}
             if context != self.last_context:
                 self.reset_inputs()
                 self.last_context = context
-            if not context:
-                self.reset_inputs()
-                return True
             pending = []
             now = time.monotonic()
             for serial, buttons, x, y, labels in samples:
@@ -229,17 +270,14 @@ class ControllerDriver:
                     break
             return True
         except Exception as error:
-            print(f'Warning: Controller support disabled: {error}', file=sys.stderr)
-            self.source = None
-            self.backend.close()
+            self._disable(error)
             return False
 
     def close(self):
-        if self.source is not None:
-            self.scheduler.source_remove(self.source)
-            self.source = None
-        self.backend.close()
-        self.inputs.clear()
+        if self.closed:
+            return
+        self.closed = True
+        self._stop()
 
 
 def set_widget_margins(widget, top=10, bottom=10, start=10, end=10):
@@ -335,6 +373,8 @@ class YaftiGTK(Gtk.Window):
         self.active_dialog_state = None
         self.controller_dialogs = []
         self.controller_driver = None
+        self._controller_closed = False
+        self._controller_focus_sync_source = None
         self.controller_focus = None
         self.controller_used = False
         self.action_widgets = {}  # action_id -> (button)
@@ -443,6 +483,8 @@ class YaftiGTK(Gtk.Window):
         GLib.idle_add(self._load_css)
 
         self.connect("notify::is-active", self.on_window_active_changed)
+        self.connect("map", self.on_controller_context_changed)
+        self.connect("unmap", self.on_controller_context_changed)
         focus_controller = Gtk.EventControllerFocus.new()
         focus_controller.connect("enter", self.on_window_focus_in)
         self.add_controller(focus_controller)
@@ -455,11 +497,14 @@ class YaftiGTK(Gtk.Window):
         GLib.idle_add(self.start_controller)
 
     def start_controller(self):
+        if self._controller_closed:
+            return False
         backend = None
         try:
             backend = SDLGamepad()
             self.controller_driver = ControllerDriver(
-                backend, self.controller_context, self.dispatch_controller)
+                backend, self.controller_context, self.dispatch_controller, active=False)
+            self.on_controller_context_changed()
         except Exception as error:
             if backend:
                 backend.close()
@@ -467,6 +512,10 @@ class YaftiGTK(Gtk.Window):
         return False
 
     def on_controller_close_request(self, *_args):
+        self._controller_closed = True
+        if self._controller_focus_sync_source is not None:
+            GLib.source_remove(self._controller_focus_sync_source)
+            self._controller_focus_sync_source = None
         if self.controller_driver:
             self.controller_driver.close()
             self.controller_driver = None
@@ -481,6 +530,8 @@ class YaftiGTK(Gtk.Window):
         dialog.connect('close-request', self.on_controller_dialog_close_request, record)
         dialog.connect('notify::focus-widget', self.on_controller_focus_changed)
         dialog.connect('notify::is-active', self.on_controller_context_changed)
+        dialog.connect('map', self.on_controller_context_changed)
+        dialog.connect('unmap', self.on_controller_context_changed)
         self.on_controller_context_changed()
 
     def on_controller_dialog_destroy(self, _dialog, record):
@@ -518,8 +569,19 @@ class YaftiGTK(Gtk.Window):
         return window if window.get_property('is-active') else None
 
     def on_controller_context_changed(self, *_args):
+        if self._controller_closed:
+            return
         if self.controller_driver:
             self.controller_driver.reset_inputs()
+        # Main and modal focus notifications can arrive in either order.
+        if self._controller_focus_sync_source is None:
+            self._controller_focus_sync_source = GLib.idle_add(self._sync_controller_focus)
+
+    def _sync_controller_focus(self):
+        self._controller_focus_sync_source = None
+        if not self._controller_closed and self.controller_driver:
+            self.controller_driver.set_active(self.controller_context() is not None)
+        return False
 
     def controller_targets(self):
         if self.controller_dialogs:
